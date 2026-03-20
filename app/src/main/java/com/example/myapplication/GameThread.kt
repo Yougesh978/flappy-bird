@@ -18,7 +18,12 @@ class GameThread(private val surfaceHolder: SurfaceHolder, private val gameView:
             var canvas: Canvas? = null
 
             try {
-                canvas = surfaceHolder.lockCanvas()
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                    canvas = surfaceHolder.lockHardwareCanvas()
+                }
+                if (canvas == null) {
+                    canvas = surfaceHolder.lockCanvas()
+                }
                 synchronized(surfaceHolder) {
                     gameView.update()
                     if (canvas != null) {

@@ -18,7 +18,8 @@ class GameView(context: Context) : SurfaceView(context), SurfaceHolder.Callback 
     // Assets
     private var bgImage: Bitmap
     private var birdFrames = arrayOfNulls<Bitmap>(3)
-    private var pipeImage: Bitmap
+    private lateinit var pipeTop: Bitmap
+    private lateinit var pipeBottom: Bitmap
     private var gameoverImage: Bitmap
     private var customFont: Typeface? = null
     
@@ -74,11 +75,34 @@ class GameView(context: Context) : SurfaceView(context), SurfaceHolder.Callback 
         
         bgWidthCached = targetBgWidth.toFloat()
         
-        birdFrames[0] = BitmapFactory.decodeStream(assetManager.open("images/flappy1.png"))
-        birdFrames[1] = BitmapFactory.decodeStream(assetManager.open("images/flappy2.png"))
-        birdFrames[2] = BitmapFactory.decodeStream(assetManager.open("images/flappy3.png"))
-        pipeImage = BitmapFactory.decodeStream(assetManager.open("images/pipe-red.png"))
-        gameoverImage = BitmapFactory.decodeStream(assetManager.open("images/gameover.png"))
+        // Pre-scale Bird
+        val rawF1 = BitmapFactory.decodeStream(assetManager.open("images/flappy1.png"))
+        birdFrames[0] = Bitmap.createScaledBitmap(rawF1, BIRD_WIDTH.toInt(), BIRD_HEIGHT.toInt(), true)
+        rawF1.recycle()
+        
+        val rawF2 = BitmapFactory.decodeStream(assetManager.open("images/flappy2.png"))
+        birdFrames[1] = Bitmap.createScaledBitmap(rawF2, BIRD_WIDTH.toInt(), BIRD_HEIGHT.toInt(), true)
+        rawF2.recycle()
+        
+        val rawF3 = BitmapFactory.decodeStream(assetManager.open("images/flappy3.png"))
+        birdFrames[2] = Bitmap.createScaledBitmap(rawF3, BIRD_WIDTH.toInt(), BIRD_HEIGHT.toInt(), true)
+        rawF3.recycle()
+
+        // Pre-scale Pipes — use full V_HEIGHT so pipes always cover the entire screen
+        val rawPipe = BitmapFactory.decodeStream(assetManager.open("images/pipe-red.png"))
+        pipeBottom = Bitmap.createScaledBitmap(rawPipe, PIPE_WIDTH.toInt(), V_HEIGHT.toInt(), true)
+        
+        val matrix = android.graphics.Matrix()
+        matrix.postScale(1f, -1f)
+        pipeTop = Bitmap.createBitmap(pipeBottom, 0, 0, pipeBottom.width, pipeBottom.height, matrix, true)
+        rawPipe.recycle()
+
+        // Pre-scale Game Over
+        val rawGo = BitmapFactory.decodeStream(assetManager.open("images/gameover.png"))
+        val goW = (rawGo.width * 2f).toInt()
+        val goH = (rawGo.height * 2f).toInt()
+        gameoverImage = Bitmap.createScaledBitmap(rawGo, goW, goH, true)
+        rawGo.recycle()
         
         try {
             customFont = Typeface.createFromAsset(assetManager, "fonts/TiltPrism-Regular.ttf")
@@ -188,18 +212,31 @@ class GameView(context: Context) : SurfaceView(context), SurfaceHolder.Callback 
                 }
             }
 
-            // Collision check
-            val birdRect = RectF(FLAPPY_X + 15f, flappyY + 15f, FLAPPY_X + BIRD_WIDTH - 15f, flappyY + BIRD_HEIGHT - 15f)
+            // Collision check manually without object allocation
+            val bx1 = FLAPPY_X + 15f
+            val by1 = flappyY + 15f
+            val bx2 = FLAPPY_X + BIRD_WIDTH - 15f
+            val by2 = flappyY + BIRD_HEIGHT - 15f
             
             if (flappyY > V_HEIGHT || flappyY < 0) {
                 gameState = GameState.GAMEOVER
             }
             
             for (pipe in pipes) {
-                val topPipeRect = RectF(pipe.x + 5f, 0f, pipe.x + PIPE_WIDTH - 5f, pipe.gapY - PIPE_GAP / 2)
-                val bottomPipeRect = RectF(pipe.x + 5f, pipe.gapY + PIPE_GAP / 2, pipe.x + PIPE_WIDTH - 5f, V_HEIGHT)
+                val tx1 = pipe.x + 5f
+                val ty1 = 0f
+                val tx2 = pipe.x + PIPE_WIDTH - 5f
+                val ty2 = pipe.gapY - PIPE_GAP / 2
                 
-                if (RectF.intersects(birdRect, topPipeRect) || RectF.intersects(birdRect, bottomPipeRect)) {
+                val btx1 = pipe.x + 5f
+                val bty1 = pipe.gapY + PIPE_GAP / 2
+                val btx2 = pipe.x + PIPE_WIDTH - 5f
+                val bty2 = V_HEIGHT
+                
+                if (bx1 < tx2 && bx2 > tx1 && by1 < ty2 && by2 > ty1) {
+                    gameState = GameState.GAMEOVER
+                }
+                if (bx1 < btx2 && bx2 > btx1 && by1 < bty2 && by2 > bty1) {
                     gameState = GameState.GAMEOVER
                 }
             }
@@ -218,39 +255,26 @@ class GameView(context: Context) : SurfaceView(context), SurfaceHolder.Callback 
         // Draw Pre-Scaled Background
         val bgOffset = if (gameState != GameState.GAMEOVER) (frames * 3f) % bgWidthCached else 0f
         
-        // Draw exactly 3 times to create infinite scrolling, using the pre-scaled image
+        // Draw 2 times to create infinite scrolling
         canvas.drawBitmap(bgImage, -bgOffset, 0f, paint)
         canvas.drawBitmap(bgImage, bgWidthCached - bgOffset, 0f, paint)
-        canvas.drawBitmap(bgImage, bgWidthCached * 2 - bgOffset, 0f, paint)
 
         // Draw Pipes
-        val pipeImgWidth = pipeImage.width.toFloat()
-        val pipeImgHeight = pipeImage.height.toFloat()
-        
         for (pipe in pipes) {
-            // Draw top pipe. To keep it simple, we use canvas.scale(1, -1) to flip it
-            canvas.save()
-            canvas.translate(pipe.x, pipe.gapY - PIPE_GAP / 2)
-            canvas.scale(1f, -1f)
-            canvas.drawBitmap(pipeImage, null, RectF(0f, 0f, PIPE_WIDTH, pipeImgHeight * 3), paint)
-            canvas.restore()
-            
-            // Draw bottom pipe
-            val bottomPipeRect = RectF(pipe.x, pipe.gapY + PIPE_GAP / 2, pipe.x + PIPE_WIDTH, pipe.gapY + PIPE_GAP / 2 + pipeImgHeight * 3)
-            canvas.drawBitmap(pipeImage, null, bottomPipeRect, paint)
+            canvas.drawBitmap(pipeTop, pipe.x, pipe.gapY - PIPE_GAP / 2 - pipeTop.height, paint)
+            canvas.drawBitmap(pipeBottom, pipe.x, pipe.gapY + PIPE_GAP / 2, paint)
         }
 
         // Draw Bird
         val bmap = birdFrames[currentFrame]
         if (bmap != null) {
-            val birdDst = RectF(FLAPPY_X, flappyY, FLAPPY_X + BIRD_WIDTH, flappyY + BIRD_HEIGHT)
             canvas.save()
             var rotation = flappyV * 2.5f
             if (rotation < -25f) rotation = -25f
             if (rotation > 90f) rotation = 90f
             if (gameState == GameState.WAITING) rotation = 0f
             canvas.rotate(rotation, FLAPPY_X + BIRD_WIDTH / 2, flappyY + BIRD_HEIGHT / 2)
-            canvas.drawBitmap(bmap, null, birdDst, paint)
+            canvas.drawBitmap(bmap, FLAPPY_X, flappyY, paint)
             canvas.restore()
         }
 
@@ -266,11 +290,9 @@ class GameView(context: Context) : SurfaceView(context), SurfaceHolder.Callback 
         }
 
         if (gameState == GameState.GAMEOVER) {
-            val goWidth = gameoverImage.width * 2f
-            val goHeight = gameoverImage.height * 2f
-            val goDst = RectF(V_WIDTH / 2 - goWidth / 2, V_HEIGHT / 2 - goHeight / 2 - 100f, 
-                V_WIDTH / 2 + goWidth / 2, V_HEIGHT / 2 - goHeight / 2 - 100f + goHeight)
-            canvas.drawBitmap(gameoverImage, null, goDst, paint)
+            val goX = V_WIDTH / 2f - gameoverImage.width / 2f
+            val goY = V_HEIGHT / 2f - gameoverImage.height / 2f - 100f
+            canvas.drawBitmap(gameoverImage, goX, goY, paint)
             
             if (frames % 60 < 30) {
                 canvas.drawText("TAP TO RESTART", V_WIDTH / 2, V_HEIGHT / 2 + 100f, textPaint)
